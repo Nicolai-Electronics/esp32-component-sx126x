@@ -6,11 +6,75 @@
 #include "driver/spi_master.h"
 #include "esp_err.h"
 
+// Registers
+#define SX126X_REG_RX_GAIN_RETENTION(X)             (0x029F + (X))  // 0-2
+#define SX126X_REG_VERSION_STRING                   0x0320
+#define SX126X_REG_HOPPING_ENABLE                   0x0385
+#define SX126X_REG_LR_FHSS_PACKET_LENGTH            0x0386
+#define SX126X_REG_LR_FHSS_NUM_HOPPING_BLOCKS       0x0387
+#define SX126X_REG_LR_FHSS_NUM_SYMBOLS_FREQX_MSB(X) (0x0388 + (X) * 6)
+#define SX126X_REG_LR_FHSS_NUM_SYMBOLS_FREQX_LSB(X) (0x0389 + (X) * 6)
+#define SX126X_REG_LR_FHSS_FREQX_0(X)               (0x038A + (X) * 6)
+#define SX126X_REG_LR_FHSS_FREQX_1(X)               (0x038B + (X) * 6)
+#define SX126X_REG_LR_FHSS_FREQX_2(X)               (0x038C + (X) * 6)
+#define SX126X_REG_LR_FHSS_FREQX_3(X)               (0x038D + (X) * 6)
+#define SX126X_REG_SPECTRAL_SCAN_RESULT             0x0401
+#define SX126X_REG_DIOX_OUT_ENABLE                  0x0580
+#define SX126X_REG_DIOX_DRIVE_STRENGTH              0x0582
+#define SX126X_REG_DIOX_IN_ENABLE                   0x0583
+#define SX126X_REG_DIOX_PULL_UP_CTRL                0x0584
+#define SX126X_REG_DIOX_PULL_DOWN_CTRL              0x0585
+#define SX126X_REG_TX_BITBANG_ENABLE_0              0x0587
+#define SX126X_REG_PATCH_UPDATE_ENABLE              0x0610
+#define SX126X_REG_TX_BITBANG_ENABLE_1              0x0680
+#define SX126X_REG_WHITENING_INITIAL_MSB            0x06B8
+#define SX126X_REG_WHITENING_INITIAL_LSB            0x06B9
+#define SX126X_REG_RX_TX_PLD_LEN                    0x06BB
+#define SX126X_REG_CRC_INITIAL_MSB                  0x06BC
+#define SX126X_REG_CRC_INITIAL_LSB                  0x06BD
+#define SX126X_REG_CRC_POLYNOMIAL_MSB               0x06BE
+#define SX126X_REG_CRC_POLYNOMIAL_LSB               0x06BF
+#define SX126X_REG_SYNC_WORD(X)                     (0x06C0 + (X))  // 0-6
+#define SX126X_REG_NODE_ADDRESS                     0x06CD
+#define SX126X_REG_BROADCAST_ADDRESS                0x06CE
+#define SX126X_REG_PAYLOAD_LENGTH                   0x0702
+#define SX126X_REG_PACKET_PARAMS                    0x0704
+#define SX126X_REG_LORA_SYNC_TIMEOUT                0x0706
+#define SX126X_REG_IQ_CONFIG                        0x0736
+#define SX126X_REG_LORA_SYNC_WORD_MSB               0x0740
+#define SX126X_REG_LORA_SYNC_WORD_LSB               0x0741
+#define SX126X_REG_FREQ_ERROR                       0x076B
+#define SX126X_REG_SPECTRAL_SCAN_STATUS             0x07CD
+#define SX126X_REG_RX_ADDR_PTR                      0x0803
+#define SX126X_REG_RANDOM_NUMBER_0                  0x0819
+#define SX126X_REG_RANDOM_NUMBER_1                  0x081A
+#define SX126X_REG_RANDOM_NUMBER_2                  0x081B
+#define SX126X_REG_RANDOM_NUMBER_3                  0x081C
+#define SX126X_REG_SENSITIVITY_CONFIG               0x0889
+#define SX126X_REG_RF_FREQUENCY(X)                  (0x088B + (X))  // 0-3
+#define SX126X_REG_RSSI_AVG_WINDOW                  0x089B
+#define SX126X_REG_RX_GAIN                          0x08AC
+#define SX126X_REG_TX_CLAMP_CONFIG                  0x08D8
+#define SX126X_REG_ANA_LNA                          0x08E2
+#define SX126X_REG_LNA_CAP_TUNE_N                   0x08E3
+#define SX126X_REG_LNA_CAP_TUNE_P                   0x08E4
+#define SX126X_REG_ANA_MIXER                        0x08E5
+#define SX126X_REG_OCP_CONFIGURATION                0x08E7
+#define SX126X_REG_RTC_CTRL                         0x0902
+#define SX126X_REG_XTA_TRIM                         0x0911
+#define SX126X_REG_XTB_TRIM                         0x0912
+#define SX126X_REG_DIO3_OUT_VOLTAGE_CTRL            0x0920
+#define SX126X_REG_EVENT_MASK                       0x0944
+#define SX126X_REG_PATCH_MEMORY_BASE                0x8000
+
 typedef struct {
     spi_device_handle_t device;
     gpio_num_t          reset;
     gpio_num_t          dio1;
     gpio_num_t          busy;
+    TickType_t          timeout;
+    SemaphoreHandle_t   busy_semaphore;
+    SemaphoreHandle_t   interrupt_semaphore;
 } sx126x_handle_t;
 
 typedef enum {
