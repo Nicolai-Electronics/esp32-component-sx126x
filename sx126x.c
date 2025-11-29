@@ -48,6 +48,7 @@
 #define SX126X_CMD_RESET_STATS                0x00
 #define SX126X_CMD_GET_DEVICE_ERRORS          0x17
 #define SX126X_CMD_CLEAR_DEVICE_ERRORS        0x07
+#define SX126X_CMD_SET_BUFFER_BASE_ADDRESS    0x8F
 
 static const char* TAG = "sx126x";
 
@@ -124,7 +125,8 @@ esp_err_t sx126x_set_op_mode_tx(sx126x_handle_t* handle) {
 
 esp_err_t sx126x_set_op_mode_rx(sx126x_handle_t* handle) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
-    return sx126x_command(handle, SX126X_CMD_SET_RX, NULL, NULL, 0);
+    uint8_t timeout[3] = {0, 0, 0};  // Continuous RX
+    return sx126x_command(handle, SX126X_CMD_SET_RX, timeout, NULL, 3);
 }
 
 esp_err_t sx126x_stop_timer_on_preamble(sx126x_handle_t* handle, bool stop) {
@@ -182,7 +184,8 @@ esp_err_t sx126x_calibrate_image(sx126x_handle_t* handle, uint8_t frequency1, ui
 
 esp_err_t sx126x_set_pa_config(sx126x_handle_t* handle, uint8_t pa_duty_cycle, uint8_t hp_max) {
     if (handle == NULL || hp_max > 0x07) return ESP_ERR_INVALID_ARG;
-    uint8_t parameters[4] = {pa_duty_cycle, hp_max, 0x00, 0x01};
+    uint8_t parameters[4] = {pa_duty_cycle, hp_max, 0x00,
+                             0x01};  // 0x00 is device select 0x00 for sx1262 and 0x01 for sx1261
     return sx126x_command(handle, SX126X_CMD_SET_PA_CONFIG, parameters, NULL, sizeof(parameters));
 }
 
@@ -279,9 +282,10 @@ esp_err_t sx126x_set_dio3_as_txco_ctrl(sx126x_handle_t* handle, float voltage, f
 
 esp_err_t sx126x_set_rf_frequency(sx126x_handle_t* handle, float frequency) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
-    const float xtal_frequency  = 32.0f;
-    uint32_t    frequency_value = (uint32_t)((frequency * (1 << 25))) / xtal_frequency;
-    uint8_t     frequency_bytes[4];
+    const double xtal_frequency  = 32.0f;
+    uint32_t     frequency_value = (frequency * ((uint32_t)(1) << 25)) / xtal_frequency;
+    printf("Frequency value: %lu\n", frequency_value);
+    uint8_t frequency_bytes[4];
     frequency_bytes[0] = (frequency_value >> 24) & 0xFF;
     frequency_bytes[1] = (frequency_value >> 16) & 0xFF;
     frequency_bytes[2] = (frequency_value >> 8) & 0xFF;
@@ -308,9 +312,11 @@ esp_err_t sx126x_get_packet_type(sx126x_handle_t* handle, sx126x_packet_type_t* 
 esp_err_t sx126x_set_tx_params(sx126x_handle_t* handle, int8_t power, bool pa_is_high_power, uint32_t ramp_time_us) {
     // You can set the PA mode using the SetPaConfig command, make sure to set the pa_is_high_power flag correctly
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
-    if (pa_is_high_power && (power < -17 || power > 14)) {
-        return ESP_ERR_INVALID_ARG;  // Power out of range for high power mode
-    } else if (power < -9 || power > 22) {
+    if (pa_is_high_power) {
+        if (power < -9 || power > 22) {
+            return ESP_ERR_INVALID_ARG;  // Power out of range for high power mode
+        }
+    } else if (power < -17 || power > 14) {
         return ESP_ERR_INVALID_ARG;  // Power out of range for low power mode
     }
     uint8_t ramp_time_value = 0;
@@ -398,6 +404,12 @@ esp_err_t sx126x_set_cad_params(sx126x_handle_t* handle, sx126x_cad_symbol_num_t
         timeout & 0xFF,           //
     };
     return sx126x_command(handle, SX126X_CMD_SET_CAD_PARAMS, parameters, NULL, sizeof(parameters));
+}
+
+esp_err_t sx126x_set_buffer_base_address(sx126x_handle_t* handle, uint8_t tx_base_address, uint8_t rx_base_address) {
+    if (handle == NULL) return ESP_ERR_INVALID_ARG;
+    uint8_t parameters[2] = {tx_base_address, rx_base_address};
+    return sx126x_command(handle, SX126X_CMD_SET_BUFFER_BASE_ADDRESS, parameters, NULL, sizeof(parameters));
 }
 
 esp_err_t sx126x_set_lora_symb_num_timeout(sx126x_handle_t* handle, uint8_t symb_num) {

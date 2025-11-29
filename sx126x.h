@@ -67,6 +67,20 @@
 #define SX126X_REG_EVENT_MASK                       0x0944
 #define SX126X_REG_PATCH_MEMORY_BASE                0x8000
 
+// Chip mode (get status)
+#define SX126X_CHIP_MODE_STDBY_RC   0x02
+#define SX126X_CHIP_MODE_STDBY_XOSC 0x03
+#define SX126X_CHIP_MODE_FS         0x04
+#define SX126X_CHIP_MODE_RX         0x05
+#define SX126X_CHIP_MODE_TX         0x06
+
+// Command status (get status)
+#define SX126X_COMMAND_STATUS_DATA_AVAILABLE 0x02
+#define SX126X_COMMAND_STATUS_TIMEOUT        0x03
+#define SX126X_COMMAND_STATUS_INVALID        0x04
+#define SX126X_COMMAND_STATUS_FAILED         0x05
+#define SX126X_COMMAND_STATUS_TX_DONE        0x06
+
 typedef struct {
     spi_device_handle_t device;
     gpio_num_t          reset;
@@ -218,6 +232,7 @@ esp_err_t sx126x_set_packet_params_gfsk(sx126x_handle_t* handle, uint16_t preamb
                                         uint8_t payload_length, uint8_t crc_type, bool whitening);
 esp_err_t sx126x_set_cad_params(sx126x_handle_t* handle, sx126x_cad_symbol_num_t symbol_num, uint8_t det_peak,
                                 uint8_t det_min, bool exit_mode, uint32_t timeout);
+esp_err_t sx126x_set_buffer_base_address(sx126x_handle_t* handle, uint8_t tx_base_address, uint8_t rx_base_address);
 esp_err_t sx126x_set_lora_symb_num_timeout(sx126x_handle_t* handle, uint8_t symb_num);
 esp_err_t sx126x_get_status(sx126x_handle_t* handle, uint8_t* out_command_status, uint8_t* out_chip_mode);
 esp_err_t sx126x_get_rx_buffer_status(sx126x_handle_t* handle, uint8_t* out_payload_length, uint8_t* out_start_pointer);
