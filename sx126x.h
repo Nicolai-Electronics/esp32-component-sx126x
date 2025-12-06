@@ -67,6 +67,8 @@
 #define SX126X_REG_EVENT_MASK                       0x0944
 #define SX126X_REG_PATCH_MEMORY_BASE                0x8000
 
+#define SX126X_VERSION_STRING_LENGTH 16
+
 // Chip mode (get status)
 #define SX126X_CHIP_MODE_STDBY_RC   0x02
 #define SX126X_CHIP_MODE_STDBY_XOSC 0x03
@@ -80,6 +82,24 @@
 #define SX126X_COMMAND_STATUS_INVALID        0x04
 #define SX126X_COMMAND_STATUS_FAILED         0x05
 #define SX126X_COMMAND_STATUS_TX_DONE        0x06
+
+// Sync word
+#define SX126X_DEFAULT_SYNC_WORD_CONTROL_BITS 0x44
+
+// IRQ
+
+#define SX126X_IRQ_TX_DONE           (1 << 0)
+#define SX126X_IRQ_RX_DONE           (1 << 1)
+#define SX126X_IRQ_PREAMBLE_DETECTED (1 << 2)
+#define SX126X_IRQ_SYNC_WORD_VALID   (1 << 3)
+#define SX126X_IRQ_HEADER_VALID      (1 << 4)
+#define SX126X_IRQ_HEADER_ERROR      (1 << 5)
+#define SX126X_IRQ_CRC_ERROR         (1 << 6)
+#define SX126X_IRQ_CAD_DONE          (1 << 7)
+#define SX126X_IRQ_CAD_DETECTED      (1 << 8)
+#define SX126X_IRQ_TIMEOUT           (1 << 9)
+#define SX126X_IRQ_LRFHSSHOP         (1 << 14)
+#define SX126X_IRQ_ALL               0xFFFF
 
 typedef struct {
     spi_device_handle_t device;
@@ -188,6 +208,7 @@ typedef enum {
     SX126X_PA_RAMP_ERR           = 0x0100,
 } sx126x_error_t;
 
+// Commands
 esp_err_t sx126x_set_op_mode_sleep(sx126x_handle_t* handle, bool warm_start, bool rtc_timeout_disable);
 esp_err_t sx126x_set_op_mode_standby(sx126x_handle_t* handle, bool use_xosc);
 esp_err_t sx126x_set_op_mode_fs(sx126x_handle_t* handle);
@@ -202,7 +223,7 @@ esp_err_t sx126x_set_regulator_mode(sx126x_handle_t* handle, bool use_dc_dc);
 esp_err_t sx126x_calibrate(sx126x_handle_t* handle, bool rc64k, bool rc13m, bool pll, bool adc_pulse, bool adc_bulk_n,
                            bool adc_bulk_p, bool image);
 esp_err_t sx126x_calibrate_image(sx126x_handle_t* handle, uint8_t frequency1, uint8_t frequency2);
-esp_err_t sx126x_set_pa_config(sx126x_handle_t* handle, uint8_t pa_duty_cycle, uint8_t hp_max);
+esp_err_t sx126x_set_pa_config(sx126x_handle_t* handle, uint8_t pa_duty_cycle, uint8_t hp_max, bool is_sx1261);
 esp_err_t sx126x_set_rx_tx_fallback_mode(sx126x_handle_t* handle, sx126x_fallback_mode_t fallback_mode);
 esp_err_t sx126x_write_register(sx126x_handle_t* handle, uint16_t address, const uint8_t* values, size_t length);
 esp_err_t sx126x_read_register(sx126x_handle_t* handle, uint16_t address, uint8_t* out_values, size_t length);
@@ -210,7 +231,8 @@ esp_err_t sx126x_write_buffer(sx126x_handle_t* handle, uint8_t offset, const uin
 esp_err_t sx126x_read_buffer(sx126x_handle_t* handle, uint8_t offset, uint8_t* out_values, size_t length);
 esp_err_t sx126x_set_dio_irq_params(sx126x_handle_t* handle, uint16_t irq_mask, uint16_t dio1_mask, uint16_t dio2_mask,
                                     uint16_t dio3_mask);
-esp_err_t sx126x_get_irq_status(sx126x_handle_t* handle, uint16_t* out_irq_status, uint8_t* out_status);
+esp_err_t sx126x_get_irq_status(sx126x_handle_t* handle, uint16_t* out_irq_status, uint8_t* out_command_status,
+                                uint8_t* out_chip_mode);
 esp_err_t sx126x_clear_irq_status(sx126x_handle_t* handle, uint16_t irq_mask);
 esp_err_t sx126x_set_dio2_as_rf_switch_ctrl(sx126x_handle_t* handle, bool enable);
 esp_err_t sx126x_set_dio3_as_txco_ctrl(sx126x_handle_t* handle, float voltage, float delay_us);
@@ -226,6 +248,8 @@ esp_err_t sx126x_set_modulation_params_gfsk(sx126x_handle_t* handle, uint32_t bi
                                             uint32_t frequency_deviation);
 esp_err_t sx126x_set_packet_params_lora(sx126x_handle_t* handle, uint16_t preamble_length, bool fixed_packet_length,
                                         uint8_t payload_length, bool crc_enabled, bool inverted_iq);
+esp_err_t sx126x_set_packet_params_lora_variable_length(sx126x_handle_t* handle, uint16_t preamble_length,
+                                                        bool crc_enabled, bool inverted_iq);
 esp_err_t sx126x_set_packet_params_gfsk(sx126x_handle_t* handle, uint16_t preamble_length,
                                         uint8_t preamble_detector_length, uint8_t sync_word_length,
                                         uint8_t address_compensation, bool packet_length_variable,
@@ -247,8 +271,17 @@ esp_err_t sx126x_get_stats_gfsk(sx126x_handle_t* handle, uint16_t* out_nb_pkt_re
                                 uint16_t* out_nb_pkt_length_error);
 esp_err_t sx126x_reset_stats(sx126x_handle_t* handle);
 esp_err_t sx126x_get_device_errors(sx126x_handle_t* handle, uint16_t* out_errors);
-esp_err_t sx126x_clear_device_errors(sx126x_handle_t* handle);
+esp_err_t sx126x_clear_device_errors(sx126x_handle_t* handle, uint8_t* out_command_status, uint8_t* out_chip_mode);
+
+// Registers
+esp_err_t sx126x_read_version_string(sx126x_handle_t* handle, char* out_buffer, size_t buffer_size);
+esp_err_t sx126x_set_sync_word_adv(sx126x_handle_t* handle, uint8_t sync_word, uint8_t control_bits);
+esp_err_t sx126x_set_sync_word(sx126x_handle_t* handle, uint8_t sync_word);
+
+// Management & control
 esp_err_t sx1262_reset(sx126x_handle_t* handle);
 esp_err_t sx126x_init(sx126x_handle_t* handle, spi_host_device_t spi_host_id, gpio_num_t nss, gpio_num_t reset,
                       gpio_num_t dio1, gpio_num_t busy);
 bool      sx126x_is_busy(sx126x_handle_t* handle);
+esp_err_t sx126x_irq_wait(sx126x_handle_t* handle, TickType_t timeout);
+bool      sx126x_get_irq_state(sx126x_handle_t* handle);

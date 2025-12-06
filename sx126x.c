@@ -52,6 +52,8 @@
 
 static const char* TAG = "sx126x";
 
+// Interrupt handlers
+
 IRAM_ATTR static void sx1262_busy_handler(void* pvParameters) {
     sx126x_handle_t* handle = (sx126x_handle_t*)pvParameters;
     if (handle == NULL) return;
@@ -67,6 +69,8 @@ IRAM_ATTR static void sx1262_dio1_handler(void* pvParameters) {
     if (handle == NULL) return;
     xSemaphoreGiveFromISR(handle->interrupt_semaphore, NULL);
 }
+
+// Private functions
 
 static esp_err_t sx126x_busy_wait(sx126x_handle_t* handle) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
@@ -97,6 +101,8 @@ static esp_err_t sx126x_command(sx126x_handle_t* handle, uint8_t command, const 
 
     return sx126x_busy_wait(handle);
 }
+
+// Public functions - commands
 
 esp_err_t sx126x_set_op_mode_sleep(sx126x_handle_t* handle, bool warm_start, bool rtc_timeout_disable) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
@@ -182,10 +188,11 @@ esp_err_t sx126x_calibrate_image(sx126x_handle_t* handle, uint8_t frequency1, ui
     return sx126x_command(handle, SX126X_CMD_CALIBRATE_IMAGE, parameters, NULL, sizeof(parameters));
 }
 
-esp_err_t sx126x_set_pa_config(sx126x_handle_t* handle, uint8_t pa_duty_cycle, uint8_t hp_max) {
+esp_err_t sx126x_set_pa_config(sx126x_handle_t* handle, uint8_t pa_duty_cycle, uint8_t hp_max, bool is_sx1261) {
     if (handle == NULL || hp_max > 0x07) return ESP_ERR_INVALID_ARG;
-    uint8_t parameters[4] = {pa_duty_cycle, hp_max, 0x00,
-                             0x01};  // 0x00 is device select 0x00 for sx1262 and 0x01 for sx1261
+    uint8_t pa_lut        = 0x01;  // Reserved byte, always 0x01
+    uint8_t device_sel    = is_sx1261 ? 0x01 : 0x00;
+    uint8_t parameters[4] = {pa_duty_cycle, hp_max, device_sel, pa_lut};
     return sx126x_command(handle, SX126X_CMD_SET_PA_CONFIG, parameters, NULL, sizeof(parameters));
 }
 
@@ -211,7 +218,8 @@ esp_err_t sx126x_set_dio_irq_params(sx126x_handle_t* handle, uint16_t irq_mask, 
     return sx126x_command(handle, SX126X_CMD_SET_DIO_IRQ_PARAMS, parameters, NULL, sizeof(parameters));
 }
 
-esp_err_t sx126x_get_irq_status(sx126x_handle_t* handle, uint16_t* out_irq_status, uint8_t* out_status) {
+esp_err_t sx126x_get_irq_status(sx126x_handle_t* handle, uint16_t* out_irq_status, uint8_t* out_command_status,
+                                uint8_t* out_chip_mode) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
 
     uint8_t result[3];
@@ -230,8 +238,11 @@ esp_err_t sx126x_get_irq_status(sx126x_handle_t* handle, uint16_t* out_irq_statu
         *out_irq_status = (result[1] << 8) | result[2];
     }
 
-    if (out_status) {
-        *out_status = result[0];
+    if (res == ESP_OK && out_command_status) {
+        *out_command_status = (result[0] >> 1) & 0x07;
+    }
+    if (res == ESP_OK && out_chip_mode) {
+        *out_chip_mode = (result[0] >> 4) & 0x07;
     }
 
     return ESP_OK;
@@ -284,8 +295,7 @@ esp_err_t sx126x_set_rf_frequency(sx126x_handle_t* handle, float frequency) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
     const double xtal_frequency  = 32.0f;
     uint32_t     frequency_value = (frequency * ((uint32_t)(1) << 25)) / xtal_frequency;
-    printf("Frequency value: %lu\n", frequency_value);
-    uint8_t frequency_bytes[4];
+    uint8_t      frequency_bytes[4];
     frequency_bytes[0] = (frequency_value >> 24) & 0xFF;
     frequency_bytes[1] = (frequency_value >> 16) & 0xFF;
     frequency_bytes[2] = (frequency_value >> 8) & 0xFF;
@@ -370,6 +380,11 @@ esp_err_t sx126x_set_packet_params_lora(sx126x_handle_t* handle, uint16_t preamb
         inverted_iq ? 0x01 : 0x00,          // Inverted IQ flag
     };
     return sx126x_command(handle, SX126X_CMD_SET_PACKET_PARAMS, parameters, NULL, sizeof(parameters));
+}
+
+esp_err_t sx126x_set_packet_params_lora_variable_length(sx126x_handle_t* handle, uint16_t preamble_length,
+                                                        bool crc_enabled, bool inverted_iq) {
+    return sx126x_set_packet_params_lora(handle, preamble_length, false, 0xFF, crc_enabled, inverted_iq);
 }
 
 esp_err_t sx126x_set_packet_params_gfsk(sx126x_handle_t* handle, uint16_t preamble_length,
@@ -504,7 +519,7 @@ esp_err_t sx126x_get_device_errors(sx126x_handle_t* handle, uint16_t* out_errors
     return res;
 }
 
-esp_err_t sx126x_clear_device_errors(sx126x_handle_t* handle) {
+esp_err_t sx126x_clear_device_errors(sx126x_handle_t* handle, uint8_t* out_command_status, uint8_t* out_chip_mode) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
 
     uint8_t result[2] = {0};
@@ -521,8 +536,8 @@ esp_err_t sx126x_clear_device_errors(sx126x_handle_t* handle) {
         return res;
     }
 
-    // Can use status, is in result[0] and result[1]
-    printf("Device errors cleared, status: %02X %02X\n", result[0], result[1]);
+    if (res == ESP_OK && out_command_status) *out_command_status = (result[0] >> 1) & 0x07;
+    if (res == ESP_OK && out_chip_mode) *out_chip_mode = (result[0] >> 4) & 0x07;
 
     return ESP_OK;
 }
@@ -597,6 +612,31 @@ esp_err_t sx126x_read_buffer(sx126x_handle_t* handle, uint8_t offset, uint8_t* o
     return spi_device_transmit(handle->device, (spi_transaction_t*)&t);
 }
 
+// Public functions - registers
+
+esp_err_t sx126x_read_version_string(sx126x_handle_t* handle, char* out_buffer, size_t buffer_size) {
+    if (out_buffer == NULL || buffer_size < 1) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(out_buffer, '\0', buffer_size);
+    if (buffer_size > SX126X_VERSION_STRING_LENGTH) {
+        buffer_size = SX126X_VERSION_STRING_LENGTH;
+    }
+    return sx126x_read_register(handle, SX126X_REG_VERSION_STRING, (uint8_t*)out_buffer, buffer_size);
+}
+
+esp_err_t sx126x_set_sync_word_adv(sx126x_handle_t* handle, uint8_t sync_word, uint8_t control_bits) {
+    uint8_t sync_word_buffer[2] = {(uint8_t)((sync_word & 0xF0) | ((control_bits & 0xF0) >> 4)),
+                                   (uint8_t)(((sync_word & 0x0F) << 4) | (control_bits & 0x0F))};
+    return sx126x_write_register(handle, SX126X_REG_LORA_SYNC_WORD_MSB, sync_word_buffer, 2);
+}
+
+esp_err_t sx126x_set_sync_word(sx126x_handle_t* handle, uint8_t sync_word) {
+    return sx126x_set_sync_word_adv(handle, sync_word, SX126X_DEFAULT_SYNC_WORD_CONTROL_BITS);
+}
+
+// Public functions - management & control
+
 esp_err_t sx1262_reset(sx126x_handle_t* handle) {
     if (handle == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -634,8 +674,6 @@ esp_err_t sx126x_init(sx126x_handle_t* handle, spi_host_device_t spi_host_id, gp
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_LOGI(TAG, "Initializing LoRa SPI device...");
-
     spi_device_interface_config_t devcfg = {
         .command_bits   = 8,        // SX1262 uses 8-bit commands
         .clock_speed_hz = 1000000,  // SX1262 support maximum 16MHz SPI clock
@@ -655,21 +693,21 @@ esp_err_t sx126x_init(sx126x_handle_t* handle, spi_host_device_t spi_host_id, gp
         .pull_down_en = 0,
         .pull_up_en   = 0,
     };
-    gpio_config(&gpio_reset_conf);
+    ESP_RETURN_ON_ERROR(gpio_config(&gpio_reset_conf), TAG, "Failed to configure reset pin");
 
     handle->reset = reset;
 
     gpio_config_t gpio_dio1_conf = {
-        .intr_type    = GPIO_INTR_NEGEDGE,
+        .intr_type    = GPIO_INTR_POSEDGE,
         .mode         = GPIO_MODE_INPUT,
         .pin_bit_mask = BIT64(dio1),
-        .pull_down_en = 0,
-        .pull_up_en   = 1,
+        .pull_down_en = 1,
+        .pull_up_en   = 0,
     };
-    ESP_RETURN_ON_ERROR(gpio_config(&gpio_dio1_conf), TAG, "Failed to configure interrupt pin");
+    ESP_RETURN_ON_ERROR(gpio_config(&gpio_dio1_conf), TAG, "Failed to configure dio1 pin");
 
-    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(busy, sx1262_dio1_handler, (void*)handle), TAG,
-                        "Failed to add interrupt handler for interrupt pin");
+    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(dio1, sx1262_dio1_handler, (void*)handle), TAG,
+                        "Failed to add interrupt handler for dio1 pin");
 
     handle->dio1 = dio1;
 
@@ -680,10 +718,10 @@ esp_err_t sx126x_init(sx126x_handle_t* handle, spi_host_device_t spi_host_id, gp
         .pull_down_en = 0,
         .pull_up_en   = 1,
     };
-    ESP_RETURN_ON_ERROR(gpio_config(&gpio_busy_conf), TAG, "Failed to configure BUSY pin");
+    ESP_RETURN_ON_ERROR(gpio_config(&gpio_busy_conf), TAG, "Failed to configure busy pin");
 
     ESP_RETURN_ON_ERROR(gpio_isr_handler_add(busy, sx1262_busy_handler, (void*)handle), TAG,
-                        "Failed to add interrupt handler for BUSY pin");
+                        "Failed to add interrupt handler for busy pin");
 
     handle->busy = busy;
 
@@ -695,4 +733,22 @@ esp_err_t sx126x_init(sx126x_handle_t* handle, spi_host_device_t spi_host_id, gp
 bool sx126x_is_busy(sx126x_handle_t* handle) {
     if (handle == NULL) return false;
     return gpio_get_level(handle->busy) == 1;
+}
+
+esp_err_t sx126x_irq_wait(sx126x_handle_t* handle, TickType_t timeout) {
+    if (handle == NULL) return ESP_ERR_INVALID_ARG;
+    if (sx126x_get_irq_state(handle)) {
+        return ESP_OK;  // Interrupt line already low
+    }
+    if (xSemaphoreTake(handle->interrupt_semaphore, timeout) == pdTRUE) {
+        return ESP_OK;
+    } else {
+        return ESP_ERR_TIMEOUT;
+    }
+}
+
+bool sx126x_get_irq_state(sx126x_handle_t* handle) {
+    if (handle == NULL) return false;
+    int level = gpio_get_level(handle->dio1);
+    return level == 1;
 }
