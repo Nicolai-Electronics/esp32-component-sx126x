@@ -236,7 +236,7 @@ esp_err_t sx126x_get_irq_status(sx126x_handle_t* handle, uint16_t* out_irq_statu
 esp_err_t sx126x_clear_irq_status(sx126x_handle_t* handle, uint16_t irq_mask);
 esp_err_t sx126x_set_dio2_as_rf_switch_ctrl(sx126x_handle_t* handle, bool enable);
 esp_err_t sx126x_set_dio3_as_txco_ctrl(sx126x_handle_t* handle, float voltage, float delay_us);
-esp_err_t sx126x_set_rf_frequency(sx126x_handle_t* handle, float frequency);
+esp_err_t sx126x_set_rf_frequency(sx126x_handle_t* handle, uint32_t frequency);
 esp_err_t sx126x_set_packet_type(sx126x_handle_t* handle, sx126x_packet_type_t packet_type);
 esp_err_t sx126x_get_packet_type(sx126x_handle_t* handle, sx126x_packet_type_t* out_packet_type);
 esp_err_t sx126x_set_tx_params(sx126x_handle_t* handle, int8_t power, bool pa_is_high_power, uint32_t ramp_time_us);

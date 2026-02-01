@@ -291,11 +291,11 @@ esp_err_t sx126x_set_dio3_as_txco_ctrl(sx126x_handle_t* handle, float voltage, f
     return sx126x_command(handle, SX126X_CMD_SET_DIO3_AS_TXCO_CTRL, parameters, NULL, sizeof(parameters));
 }
 
-esp_err_t sx126x_set_rf_frequency(sx126x_handle_t* handle, float frequency) {
+esp_err_t sx126x_set_rf_frequency(sx126x_handle_t* handle, uint32_t frequency) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
-    const double xtal_frequency  = 32.0f;
-    uint32_t     frequency_value = (frequency * ((uint32_t)(1) << 25)) / xtal_frequency;
-    uint8_t      frequency_bytes[4];
+    const uint32_t xtal_frequency  = 32000000;  // Hz
+    uint32_t       frequency_value = frequency * (uint32_t)((1) << 25) / xtal_frequency;
+    uint8_t        frequency_bytes[4];
     frequency_bytes[0] = (frequency_value >> 24) & 0xFF;
     frequency_bytes[1] = (frequency_value >> 16) & 0xFF;
     frequency_bytes[2] = (frequency_value >> 8) & 0xFF;
