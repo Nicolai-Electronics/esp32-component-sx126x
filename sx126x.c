@@ -72,6 +72,16 @@ IRAM_ATTR static void sx1262_dio1_handler(void* pvParameters) {
 
 // Private functions
 
+static esp_err_t wrapped_spi_transmit(sx126x_handle_t* handle, spi_transaction_t* transaction) {
+    if (handle == NULL || transaction == NULL) return ESP_ERR_INVALID_ARG;
+    if (xSemaphoreTake(handle->spi_semaphore, portMAX_DELAY) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_err_t res = spi_device_transmit(handle->device, transaction);
+    xSemaphoreGive(handle->spi_semaphore);
+    return res;
+}
+
 static esp_err_t sx126x_busy_wait(sx126x_handle_t* handle) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
     if (!gpio_get_level(handle->busy)) {
@@ -96,7 +106,7 @@ static esp_err_t sx126x_command(sx126x_handle_t* handle, uint8_t command, const 
         .rx_buffer = rx_data,
     };
 
-    esp_err_t res = spi_device_transmit(handle->device, &t);
+    esp_err_t res = wrapped_spi_transmit(handle, &t);
     if (res != ESP_OK) return res;
 
     return sx126x_busy_wait(handle);
@@ -124,15 +134,18 @@ esp_err_t sx126x_set_op_mode_fs(sx126x_handle_t* handle) {
     return sx126x_command(handle, SX126X_CMD_SET_FS, NULL, NULL, 0);
 }
 
-esp_err_t sx126x_set_op_mode_tx(sx126x_handle_t* handle) {
+esp_err_t sx126x_set_op_mode_tx(sx126x_handle_t* handle, uint32_t timeout) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
-    return sx126x_command(handle, SX126X_CMD_SET_TX, NULL, NULL, 0);
+    uint8_t   timeout_bytes[3] = {(timeout >> 16) & 0xFF, (timeout >> 8) & 0xFF, timeout & 0xFF};
+    esp_err_t res              = sx126x_command(handle, SX126X_CMD_SET_TX, timeout_bytes, NULL, 3);
+    if (res != ESP_OK) return res;
+    return sx126x_busy_wait(handle);
 }
 
-esp_err_t sx126x_set_op_mode_rx(sx126x_handle_t* handle) {
+esp_err_t sx126x_set_op_mode_rx(sx126x_handle_t* handle, uint32_t timeout) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
-    uint8_t timeout[3] = {0, 0, 0};  // Continuous RX
-    return sx126x_command(handle, SX126X_CMD_SET_RX, timeout, NULL, 3);
+    uint8_t timeout_bytes[3] = {(timeout >> 16) & 0xFF, (timeout >> 8) & 0xFF, timeout & 0xFF};
+    return sx126x_command(handle, SX126X_CMD_SET_RX, timeout_bytes, NULL, 3);
 }
 
 esp_err_t sx126x_stop_timer_on_preamble(sx126x_handle_t* handle, bool stop) {
@@ -231,7 +244,7 @@ esp_err_t sx126x_get_irq_status(sx126x_handle_t* handle, uint16_t* out_irq_statu
         .tx_buffer = NULL,
         .rx_buffer = result,
     };
-    esp_err_t res = spi_device_transmit(handle->device, &t);
+    esp_err_t res = wrapped_spi_transmit(handle, &t);
     if (res != ESP_OK) return res;
 
     if (out_irq_status) {
@@ -262,7 +275,7 @@ esp_err_t sx126x_clear_irq_status(sx126x_handle_t* handle, uint16_t irq_mask) {
         .tx_buffer = parameters,
         .rx_buffer = NULL,
     };
-    return spi_device_transmit(handle->device, &t);
+    return wrapped_spi_transmit(handle, &t);
 }
 
 esp_err_t sx126x_set_dio2_as_rf_switch_ctrl(sx126x_handle_t* handle, bool enable) {
@@ -531,7 +544,7 @@ esp_err_t sx126x_clear_device_errors(sx126x_handle_t* handle, uint8_t* out_comma
         .tx_buffer = NULL,
         .rx_buffer = result,
     };
-    esp_err_t res = spi_device_transmit(handle->device, &t);
+    esp_err_t res = wrapped_spi_transmit(handle, &t);
     if (res != ESP_OK) {
         return res;
     }
@@ -556,7 +569,7 @@ esp_err_t sx126x_write_register(sx126x_handle_t* handle, uint16_t address, const
             },
         .address_bits = 16,
     };
-    return spi_device_transmit(handle->device, (spi_transaction_t*)&t);
+    return wrapped_spi_transmit(handle, (spi_transaction_t*)&t);
 }
 
 esp_err_t sx126x_read_register(sx126x_handle_t* handle, uint16_t address, uint8_t* out_values, size_t length) {
@@ -574,7 +587,7 @@ esp_err_t sx126x_read_register(sx126x_handle_t* handle, uint16_t address, uint8_
         .address_bits = 16,
         .dummy_bits   = 8,
     };
-    return spi_device_transmit(handle->device, (spi_transaction_t*)&t);
+    return wrapped_spi_transmit(handle, (spi_transaction_t*)&t);
 }
 
 esp_err_t sx126x_write_buffer(sx126x_handle_t* handle, uint8_t offset, const uint8_t* values, size_t length) {
@@ -591,7 +604,7 @@ esp_err_t sx126x_write_buffer(sx126x_handle_t* handle, uint8_t offset, const uin
             },
         .address_bits = 8,
     };
-    return spi_device_transmit(handle->device, (spi_transaction_t*)&t);
+    return wrapped_spi_transmit(handle, (spi_transaction_t*)&t);
 }
 
 esp_err_t sx126x_read_buffer(sx126x_handle_t* handle, uint8_t offset, uint8_t* out_values, size_t length) {
@@ -609,7 +622,7 @@ esp_err_t sx126x_read_buffer(sx126x_handle_t* handle, uint8_t offset, uint8_t* o
         .address_bits = 8,
         .dummy_bits   = 8,
     };
-    return spi_device_transmit(handle->device, (spi_transaction_t*)&t);
+    return wrapped_spi_transmit(handle, (spi_transaction_t*)&t);
 }
 
 // Public functions - registers
@@ -663,6 +676,12 @@ esp_err_t sx126x_init(sx126x_handle_t* handle, spi_host_device_t spi_host_id, gp
     if (!handle) return ESP_ERR_INVALID_ARG;
 
     handle->timeout = pdMS_TO_TICKS(1000);
+
+    handle->spi_semaphore = xSemaphoreCreateBinary();
+    if (handle->spi_semaphore == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    xSemaphoreGive(handle->spi_semaphore);  // Initially available
 
     handle->busy_semaphore = xSemaphoreCreateBinary();
     if (handle->busy_semaphore == NULL) {

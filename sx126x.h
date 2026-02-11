@@ -107,6 +107,7 @@ typedef struct {
     gpio_num_t          dio1;
     gpio_num_t          busy;
     TickType_t          timeout;
+    SemaphoreHandle_t   spi_semaphore;
     SemaphoreHandle_t   busy_semaphore;
     SemaphoreHandle_t   interrupt_semaphore;
 } sx126x_handle_t;
@@ -212,8 +213,8 @@ typedef enum {
 esp_err_t sx126x_set_op_mode_sleep(sx126x_handle_t* handle, bool warm_start, bool rtc_timeout_disable);
 esp_err_t sx126x_set_op_mode_standby(sx126x_handle_t* handle, bool use_xosc);
 esp_err_t sx126x_set_op_mode_fs(sx126x_handle_t* handle);
-esp_err_t sx126x_set_op_mode_tx(sx126x_handle_t* handle);
-esp_err_t sx126x_set_op_mode_rx(sx126x_handle_t* handle);
+esp_err_t sx126x_set_op_mode_tx(sx126x_handle_t* handle, uint32_t timeout);
+esp_err_t sx126x_set_op_mode_rx(sx126x_handle_t* handle, uint32_t timeout);
 esp_err_t sx126x_stop_timer_on_preamble(sx126x_handle_t* handle, bool stop);
 esp_err_t sx126x_set_rx_duty_cycle(sx126x_handle_t* handle, uint32_t rx_period, uint32_t sleep_period);
 esp_err_t sx126x_set_cad(sx126x_handle_t* handle);
