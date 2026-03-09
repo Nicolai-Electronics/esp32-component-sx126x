@@ -261,10 +261,10 @@ esp_err_t sx126x_set_buffer_base_address(sx126x_handle_t* handle, uint8_t tx_bas
 esp_err_t sx126x_set_lora_symb_num_timeout(sx126x_handle_t* handle, uint8_t symb_num);
 esp_err_t sx126x_get_status(sx126x_handle_t* handle, uint8_t* out_command_status, uint8_t* out_chip_mode);
 esp_err_t sx126x_get_rx_buffer_status(sx126x_handle_t* handle, uint8_t* out_payload_length, uint8_t* out_start_pointer);
-esp_err_t sx126x_get_packet_status_lora(sx126x_handle_t* handle, uint8_t* out_rx_status, uint8_t* out_rssi_sync,
-                                        uint8_t* out_rssi_avg);
-esp_err_t sx126x_get_packet_status_gfsk(sx126x_handle_t* handle, uint8_t* out_rx_status, uint8_t* out_rssi_sync,
-                                        uint8_t* out_rssi_avg);
+esp_err_t sx126x_get_packet_status_lora(sx126x_handle_t* handle, float* out_snr_pkt_db, float* out_rssi_pkt_dbm, 
+                                        float* out_signal_rssi_pkt_db);
+esp_err_t sx126x_get_packet_status_gfsk(sx126x_handle_t* handle, uint8_t* out_rx_status, float* out_rssi_sync_dbm,
+                                        float* out_rssi_avg_dbm);
 esp_err_t sx126x_get_rssi_inst(sx126x_handle_t* handle, float* out_signal_power);
 esp_err_t sx126x_get_stats_lora(sx126x_handle_t* handle, uint16_t* out_nb_pkt_received, uint16_t* out_nb_pkt_crc_error,
                                 uint16_t* out_nb_pkt_header_error);
