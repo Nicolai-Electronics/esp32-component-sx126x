@@ -464,25 +464,25 @@ esp_err_t sx126x_get_rx_buffer_status(sx126x_handle_t* handle, uint8_t* out_payl
     return res;
 }
 
-esp_err_t sx126x_get_packet_status_lora(sx126x_handle_t* handle, uint8_t* out_rx_status, uint8_t* out_rssi_sync,
-                                        uint8_t* out_rssi_avg) {
+esp_err_t sx126x_get_packet_status_lora(sx126x_handle_t* handle, float* out_snr_pkt_db, float* out_rssi_pkt_dbm, 
+                                        float* out_signal_rssi_pkt_db) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
-    uint8_t   result[4] = {0};
-    esp_err_t res       = sx126x_command(handle, SX126X_CMD_GET_PACKET_STATUS, NULL, result, sizeof(result));
-    if (res == ESP_OK && out_rx_status) *out_rx_status = result[1];
-    if (res == ESP_OK && out_rssi_sync) *out_rssi_sync = result[2];
-    if (res == ESP_OK && out_rssi_avg) *out_rssi_avg = result[3];
+    uint8_t result[5] = {0};
+    esp_err_t res = sx126x_command(handle, SX126X_CMD_GET_PACKET_STATUS, NULL, result, sizeof(result));
+    if (res == ESP_OK && out_rssi_pkt_dbm) *out_rssi_pkt_dbm = (float)(-result[2] / 2.0f);
+    if (res == ESP_OK && out_snr_pkt_db) *out_snr_pkt_db = (float)(result[3] / 4.0f);
+    if (res == ESP_OK && out_signal_rssi_pkt_db) *out_signal_rssi_pkt_db = (float)(-result[4] / 2.0f);
     return res;
 }
 
-esp_err_t sx126x_get_packet_status_gfsk(sx126x_handle_t* handle, uint8_t* out_rx_status, uint8_t* out_rssi_sync,
-                                        uint8_t* out_rssi_avg) {
+esp_err_t sx126x_get_packet_status_gfsk(sx126x_handle_t* handle, uint8_t* out_rx_status, float* out_rssi_sync_dbm,
+                                        float* out_rssi_avg_dbm) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
-    uint8_t   result[4] = {0};
-    esp_err_t res       = sx126x_command(handle, SX126X_CMD_GET_PACKET_STATUS, NULL, result, sizeof(result));
-    if (res == ESP_OK && out_rx_status) *out_rx_status = result[1];
-    if (res == ESP_OK && out_rssi_sync) *out_rssi_sync = result[2];
-    if (res == ESP_OK && out_rssi_avg) *out_rssi_avg = result[3];
+    uint8_t result[5] = {0};
+    esp_err_t res = sx126x_command(handle, SX126X_CMD_GET_PACKET_STATUS, NULL, result, sizeof(result));
+    if (res == ESP_OK && out_rx_status) *out_rx_status = result[2];
+    if (res == ESP_OK && out_rssi_sync_dbm) *out_rssi_sync_dbm = (float)(-result[3] / 2.0f);
+    if (res == ESP_OK && out_rssi_avg_dbm) *out_rssi_avg_dbm = (float)(-result[4] / 2.0f);
     return res;
 }
 
