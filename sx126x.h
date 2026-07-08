@@ -110,6 +110,7 @@ typedef struct {
     SemaphoreHandle_t   spi_semaphore;
     SemaphoreHandle_t   busy_semaphore;
     SemaphoreHandle_t   interrupt_semaphore;
+    uint32_t            calibrated_frequency;  // Hz, frequency the image calibration was last run for (0 initially)
 } sx126x_handle_t;
 
 typedef enum {
@@ -224,6 +225,7 @@ esp_err_t sx126x_set_regulator_mode(sx126x_handle_t* handle, bool use_dc_dc);
 esp_err_t sx126x_calibrate(sx126x_handle_t* handle, bool rc64k, bool rc13m, bool pll, bool adc_pulse, bool adc_bulk_n,
                            bool adc_bulk_p, bool image);
 esp_err_t sx126x_calibrate_image(sx126x_handle_t* handle, uint8_t frequency1, uint8_t frequency2);
+esp_err_t sx126x_calibrate_image_for_frequency(sx126x_handle_t* handle, uint32_t frequency);
 esp_err_t sx126x_set_pa_config(sx126x_handle_t* handle, uint8_t pa_duty_cycle, uint8_t hp_max, bool is_sx1261);
 esp_err_t sx126x_set_rx_tx_fallback_mode(sx126x_handle_t* handle, sx126x_fallback_mode_t fallback_mode);
 esp_err_t sx126x_write_register(sx126x_handle_t* handle, uint16_t address, const uint8_t* values, size_t length);

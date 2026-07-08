@@ -1,5 +1,6 @@
 #include "sx126x.h"
 #include <iso646.h>
+#include <math.h>
 #include <stdint.h>
 #include "driver/spi_common.h"
 #include "driver/spi_master.h"
@@ -49,6 +50,21 @@
 #define SX126X_CMD_GET_DEVICE_ERRORS          0x17
 #define SX126X_CMD_CLEAR_DEVICE_ERRORS        0x07
 #define SX126X_CMD_SET_BUFFER_BASE_ADDRESS    0x8F
+
+// Image calibration byte pairs for the predefined frequency bands (datasheet section 9.2.1 / 13.1.7)
+#define SX126X_CAL_IMG_430_MHZ_1 0x6B
+#define SX126X_CAL_IMG_430_MHZ_2 0x6F
+#define SX126X_CAL_IMG_470_MHZ_1 0x75
+#define SX126X_CAL_IMG_470_MHZ_2 0x81
+#define SX126X_CAL_IMG_779_MHZ_1 0xC1
+#define SX126X_CAL_IMG_779_MHZ_2 0xC5
+#define SX126X_CAL_IMG_863_MHZ_1 0xD7
+#define SX126X_CAL_IMG_863_MHZ_2 0xDB
+#define SX126X_CAL_IMG_902_MHZ_1 0xE1
+#define SX126X_CAL_IMG_902_MHZ_2 0xE9
+
+// Re-run image calibration whenever the RF frequency moves by at least this much
+#define SX126X_CAL_IMG_FREQ_TRIG_HZ 20000000  // 20 MHz
 
 static const char* TAG = "sx126x";
 
@@ -233,6 +249,34 @@ esp_err_t sx126x_calibrate_image(sx126x_handle_t* handle, uint8_t frequency1, ui
     return sx126x_command(handle, SX126X_CMD_CALIBRATE_IMAGE, parameters, NULL, sizeof(parameters));
 }
 
+esp_err_t sx126x_calibrate_image_for_frequency(sx126x_handle_t* handle, uint32_t frequency) {
+    if (handle == NULL) return ESP_ERR_INVALID_ARG;
+
+    int freq_band_mhz = (int)(frequency / 1000000);
+    if (freq_band_mhz >= 902 && freq_band_mhz <= 928) {
+        return sx126x_calibrate_image(handle, SX126X_CAL_IMG_902_MHZ_1, SX126X_CAL_IMG_902_MHZ_2);
+    } else if (freq_band_mhz >= 863 && freq_band_mhz <= 870) {
+        return sx126x_calibrate_image(handle, SX126X_CAL_IMG_863_MHZ_1, SX126X_CAL_IMG_863_MHZ_2);
+    } else if (freq_band_mhz >= 779 && freq_band_mhz <= 787) {
+        return sx126x_calibrate_image(handle, SX126X_CAL_IMG_779_MHZ_1, SX126X_CAL_IMG_779_MHZ_2);
+    } else if (freq_band_mhz >= 470 && freq_band_mhz <= 510) {
+        return sx126x_calibrate_image(handle, SX126X_CAL_IMG_470_MHZ_1, SX126X_CAL_IMG_470_MHZ_2);
+    } else if (freq_band_mhz >= 430 && freq_band_mhz <= 440) {
+        return sx126x_calibrate_image(handle, SX126X_CAL_IMG_430_MHZ_1, SX126X_CAL_IMG_430_MHZ_2);
+    }
+
+    // Frequency falls outside the predefined bands: derive calibration bytes for a +/-4 MHz
+    // window around it, per the datasheet's CalibrateImage guidance.
+    float   freq_mhz = (float)frequency / 1000000.0f;
+    float   freq_min = freq_mhz - 4.0f;
+    float   freq_max = freq_mhz + 4.0f;
+    uint8_t data0    = (uint8_t)floorf((freq_min - 1.0f) / 4.0f);
+    uint8_t data1    = (uint8_t)ceilf((freq_max + 1.0f) / 4.0f);
+    data0            = (data0 % 2) ? data0 : (uint8_t)(data0 - 1);
+    data1            = (data1 % 2) ? data1 : (uint8_t)(data1 + 1);
+    return sx126x_calibrate_image(handle, data0, data1);
+}
+
 esp_err_t sx126x_set_pa_config(sx126x_handle_t* handle, uint8_t pa_duty_cycle, uint8_t hp_max, bool is_sx1261) {
     if (handle == NULL || hp_max > 0x07) return ESP_ERR_INVALID_ARG;
     uint8_t pa_lut        = 0x01;  // Reserved byte, always 0x01
@@ -338,6 +382,18 @@ esp_err_t sx126x_set_dio3_as_txco_ctrl(sx126x_handle_t* handle, float voltage, f
 
 esp_err_t sx126x_set_rf_frequency(sx126x_handle_t* handle, uint32_t frequency) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
+
+    // Image rejection calibration is only valid near the frequency it was performed at, so
+    // re-calibrate whenever the carrier moves far enough that the old calibration no longer
+    // applies (e.g. hopping between regional bands). This mirrors RadioLib's SX1262::setFrequency.
+    uint32_t delta = (frequency > handle->calibrated_frequency) ? (frequency - handle->calibrated_frequency)
+                                                                : (handle->calibrated_frequency - frequency);
+    if (delta >= SX126X_CAL_IMG_FREQ_TRIG_HZ) {
+        esp_err_t res = sx126x_calibrate_image_for_frequency(handle, frequency);
+        if (res != ESP_OK) return res;
+        handle->calibrated_frequency = frequency;
+    }
+
     const uint64_t xtal_frequency  = 32000000;  // Hz
     uint32_t       frequency_value = ((uint64_t)(frequency) * (uint64_t)((1) << 25)) / xtal_frequency;
     uint8_t        frequency_bytes[4];
@@ -707,7 +763,8 @@ esp_err_t sx126x_init(sx126x_handle_t* handle, spi_host_device_t spi_host_id, gp
 
     if (!handle) return ESP_ERR_INVALID_ARG;
 
-    handle->timeout = pdMS_TO_TICKS(1000);
+    handle->timeout              = pdMS_TO_TICKS(1000);
+    handle->calibrated_frequency = 0;  // Force image calibration on the first sx126x_set_rf_frequency call
 
     handle->spi_semaphore = xSemaphoreCreateBinary();
     if (handle->spi_semaphore == NULL) {
