@@ -563,6 +563,30 @@ esp_err_t sx126x_get_packet_status_lora(sx126x_handle_t* handle, uint8_t* out_rx
     return res;
 }
 
+esp_err_t sx126x_get_lora_frequency_error(sx126x_handle_t* handle, sx126x_lora_bandwidth_t bandwidth,
+                                          float* out_frequency_error_hz) {
+    if (handle == NULL) return ESP_ERR_INVALID_ARG;
+
+    uint8_t   efe_raw[3];
+    esp_err_t res = sx126x_read_register(handle, SX126X_REG_FREQ_ERROR, efe_raw, sizeof(efe_raw));
+    if (res != ESP_OK) return res;
+
+    if (out_frequency_error_hz == NULL) return ESP_OK;
+
+    uint32_t efe  = ((uint32_t)efe_raw[0] << 16) | ((uint32_t)efe_raw[1] << 8) | efe_raw[2];
+    efe          &= 0x0FFFFF;  // 20-bit signed value
+
+    float bandwidth_khz = sx126x_lora_bandwidth_khz(bandwidth);
+    if (efe & 0x80000) {
+        efe                     = (~efe + 1) & 0x0FFFFF;  // Negative: undo two's complement
+        *out_frequency_error_hz = -1.55f * (float)efe / (1600.0f / bandwidth_khz);
+    } else {
+        *out_frequency_error_hz = 1.55f * (float)efe / (1600.0f / bandwidth_khz);
+    }
+
+    return ESP_OK;
+}
+
 esp_err_t sx126x_get_packet_status_gfsk(sx126x_handle_t* handle, uint8_t* out_rx_status, uint8_t* out_rssi_sync,
                                         uint8_t* out_rssi_avg) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
