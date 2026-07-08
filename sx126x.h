@@ -243,7 +243,7 @@ esp_err_t sx126x_get_packet_type(sx126x_handle_t* handle, sx126x_packet_type_t* 
 esp_err_t sx126x_set_tx_params(sx126x_handle_t* handle, int8_t power, bool pa_is_high_power, uint32_t ramp_time_us);
 esp_err_t sx126x_set_modulation_params_lora(sx126x_handle_t* handle, sx126x_lora_spreading_factor_t spreading_factor,
                                             sx126x_lora_bandwidth_t bandwidth, sx126x_lora_coding_rate_t coding_rate,
-                                            bool low_data_rate_optimization);
+                                            bool automatic_ldro, bool low_data_rate_optimization);
 esp_err_t sx126x_set_modulation_params_gfsk(sx126x_handle_t* handle, uint32_t bit_rate,
                                             sx1262_gfsk_pulse_shape_t pulse_shape, sx126x_gfsk_bandwidth_t bandwidth,
                                             uint32_t frequency_deviation);

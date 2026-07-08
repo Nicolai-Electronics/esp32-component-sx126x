@@ -112,6 +112,38 @@ static esp_err_t sx126x_command(sx126x_handle_t* handle, uint8_t command, const 
     return sx126x_busy_wait(handle);
 }
 
+static float sx126x_lora_bandwidth_khz(sx126x_lora_bandwidth_t bandwidth) {
+    switch (bandwidth) {
+        case SX126X_LORA_BANDWIDTH_7:
+            return 7.8f;
+        case SX126X_LORA_BANDWIDTH_10:
+            return 10.4f;
+        case SX126X_LORA_BANDWIDTH_15:
+            return 15.6f;
+        case SX126X_LORA_BANDWIDTH_20:
+            return 20.8f;
+        case SX126X_LORA_BANDWIDTH_31:
+            return 31.25f;
+        case SX126X_LORA_BANDWIDTH_41:
+            return 41.7f;
+        case SX126X_LORA_BANDWIDTH_62:
+            return 62.5f;
+        case SX126X_LORA_BANDWIDTH_125:
+            return 125.0f;
+        case SX126X_LORA_BANDWIDTH_250:
+            return 250.0f;
+        case SX126X_LORA_BANDWIDTH_500:
+            return 500.0f;
+    }
+    return 125.0f;  // Unreachable for a valid enum value
+}
+
+static bool sx126x_lora_calculate_ldro(sx126x_lora_spreading_factor_t spreading_factor,
+                                       sx126x_lora_bandwidth_t        bandwidth) {
+    float symbol_length_ms = (float)(1u << (uint8_t)spreading_factor) / sx126x_lora_bandwidth_khz(bandwidth);
+    return symbol_length_ms >= 16.0f;
+}
+
 // Public functions - commands
 
 esp_err_t sx126x_set_op_mode_sleep(sx126x_handle_t* handle, bool warm_start, bool rtc_timeout_disable) {
@@ -287,7 +319,6 @@ esp_err_t sx126x_set_dio2_as_rf_switch_ctrl(sx126x_handle_t* handle, bool enable
 esp_err_t sx126x_set_dio3_as_txco_ctrl(sx126x_handle_t* handle, float voltage, float delay_us) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
     uint8_t voltage_value = 0;
-    if (voltage >= 1.6) voltage_value = 0x00;
     if (voltage >= 1.7) voltage_value = 0x01;
     if (voltage >= 1.8) voltage_value = 0x02;
     if (voltage >= 2.2) voltage_value = 0x03;
@@ -357,10 +388,10 @@ esp_err_t sx126x_set_tx_params(sx126x_handle_t* handle, int8_t power, bool pa_is
 
 esp_err_t sx126x_set_modulation_params_lora(sx126x_handle_t* handle, sx126x_lora_spreading_factor_t spreading_factor,
                                             sx126x_lora_bandwidth_t bandwidth, sx126x_lora_coding_rate_t coding_rate,
-                                            bool low_data_rate_optimization) {
+                                            bool automatic_ldro, bool low_data_rate_optimization) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
-    uint8_t parameters[4] = {(uint8_t)spreading_factor, (uint8_t)bandwidth, (uint8_t)coding_rate,
-                             low_data_rate_optimization ? 0x01 : 0x00};
+    bool ldro = automatic_ldro ? sx126x_lora_calculate_ldro(spreading_factor, bandwidth) : low_data_rate_optimization;
+    uint8_t parameters[4] = {(uint8_t)spreading_factor, (uint8_t)bandwidth, (uint8_t)coding_rate, ldro ? 0x01 : 0x00};
     return sx126x_command(handle, SX126X_CMD_SET_MODULATION_PARAMS, parameters, NULL, sizeof(parameters));
 }
 
