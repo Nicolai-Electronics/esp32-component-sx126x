@@ -287,14 +287,15 @@ esp_err_t sx126x_set_dio2_as_rf_switch_ctrl(sx126x_handle_t* handle, bool enable
 esp_err_t sx126x_set_dio3_as_txco_ctrl(sx126x_handle_t* handle, float voltage, float delay_us) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
     uint8_t voltage_value = 0;
-    if (voltage >= 1.6) voltage_value = 0x01;
-    if (voltage >= 1.7) voltage_value = 0x02;
-    if (voltage >= 1.8) voltage_value = 0x03;
-    if (voltage >= 2.2) voltage_value = 0x04;
+    if (voltage >= 1.6) voltage_value = 0x00;
+    if (voltage >= 1.7) voltage_value = 0x01;
+    if (voltage >= 1.8) voltage_value = 0x02;
+    if (voltage >= 2.2) voltage_value = 0x03;
+    if (voltage >= 2.4) voltage_value = 0x04;
     if (voltage >= 2.7) voltage_value = 0x05;
     if (voltage >= 3.0) voltage_value = 0x06;
     if (voltage >= 3.3) voltage_value = 0x07;
-    uint32_t delay_value = (uint32_t)(delay_us / 15.62f);
+    uint32_t delay_value = (uint32_t)(delay_us / 15.625f);
     if (delay_value > 0x00FFFFFF) return ESP_ERR_INVALID_ARG;  // Delay exceeds maximum value
     uint8_t parameters[4];
     parameters[0] = voltage_value;
@@ -366,18 +367,18 @@ esp_err_t sx126x_set_modulation_params_lora(sx126x_handle_t* handle, sx126x_lora
 esp_err_t sx126x_set_modulation_params_gfsk(sx126x_handle_t* handle, uint32_t bit_rate,
                                             sx1262_gfsk_pulse_shape_t pulse_shape, sx126x_gfsk_bandwidth_t bandwidth,
                                             uint32_t frequency_deviation) {
-    if (handle == NULL) return ESP_ERR_INVALID_ARG;
-    const float xtal_frequency            = 32.0f;
-    uint32_t    bit_rate_value            = (32 * xtal_frequency) / bit_rate;
-    uint32_t    frequency_deviation_value = (uint32_t)((frequency_deviation * (1 << 25))) / xtal_frequency;
-    uint8_t     parameters[8]             = {(bit_rate_value >> 16) & 0xFF,
-                                             (bit_rate_value >> 8) & 0xFF,
-                                             bit_rate_value & 0xFF,
-                                             (uint8_t)pulse_shape,
-                                             (uint8_t)bandwidth,
-                                             (frequency_deviation_value >> 16) & 0xFF,
-                                             (frequency_deviation_value >> 8) & 0xFF,
-                                             frequency_deviation_value & 0xFF};
+    if (handle == NULL || bit_rate == 0) return ESP_ERR_INVALID_ARG;
+    const uint64_t xtal_frequency            = 32000000;  // Hz
+    uint32_t       bit_rate_value            = ((uint64_t)xtal_frequency * 32) / bit_rate;
+    uint32_t       frequency_deviation_value = ((uint64_t)frequency_deviation * ((uint64_t)1 << 25)) / xtal_frequency;
+    uint8_t        parameters[8]             = {(bit_rate_value >> 16) & 0xFF,
+                                                (bit_rate_value >> 8) & 0xFF,
+                                                bit_rate_value & 0xFF,
+                                                (uint8_t)pulse_shape,
+                                                (uint8_t)bandwidth,
+                                                (frequency_deviation_value >> 16) & 0xFF,
+                                                (frequency_deviation_value >> 8) & 0xFF,
+                                                frequency_deviation_value & 0xFF};
     return sx126x_command(handle, SX126X_CMD_SET_MODULATION_PARAMS, parameters, NULL, sizeof(parameters));
 }
 
