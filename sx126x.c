@@ -380,6 +380,12 @@ esp_err_t sx126x_set_dio3_as_txco_ctrl(sx126x_handle_t* handle, float voltage, f
     return sx126x_command(handle, SX126X_CMD_SET_DIO3_AS_TXCO_CTRL, parameters, NULL, sizeof(parameters));
 }
 
+esp_err_t sx126x_set_xtal_frequency(sx126x_handle_t* handle, uint32_t xtal_frequency_hz) {
+    if (handle == NULL || xtal_frequency_hz == 0) return ESP_ERR_INVALID_ARG;
+    handle->xtal_frequency_hz = xtal_frequency_hz;
+    return ESP_OK;
+}
+
 esp_err_t sx126x_set_rf_frequency(sx126x_handle_t* handle, uint32_t frequency) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
 
@@ -394,9 +400,8 @@ esp_err_t sx126x_set_rf_frequency(sx126x_handle_t* handle, uint32_t frequency) {
         handle->calibrated_frequency = frequency;
     }
 
-    const uint64_t xtal_frequency  = 32000000;  // Hz
-    uint32_t       frequency_value = ((uint64_t)(frequency) * (uint64_t)((1) << 25)) / xtal_frequency;
-    uint8_t        frequency_bytes[4];
+    uint32_t frequency_value = ((uint64_t)(frequency) * (uint64_t)((1) << 25)) / handle->xtal_frequency_hz;
+    uint8_t  frequency_bytes[4];
     frequency_bytes[0] = (frequency_value >> 24) & 0xFF;
     frequency_bytes[1] = (frequency_value >> 16) & 0xFF;
     frequency_bytes[2] = (frequency_value >> 8) & 0xFF;
@@ -455,17 +460,17 @@ esp_err_t sx126x_set_modulation_params_gfsk(sx126x_handle_t* handle, uint32_t bi
                                             sx1262_gfsk_pulse_shape_t pulse_shape, sx126x_gfsk_bandwidth_t bandwidth,
                                             uint32_t frequency_deviation) {
     if (handle == NULL || bit_rate == 0) return ESP_ERR_INVALID_ARG;
-    const uint64_t xtal_frequency            = 32000000;  // Hz
-    uint32_t       bit_rate_value            = ((uint64_t)xtal_frequency * 32) / bit_rate;
-    uint32_t       frequency_deviation_value = ((uint64_t)frequency_deviation * ((uint64_t)1 << 25)) / xtal_frequency;
-    uint8_t        parameters[8]             = {(bit_rate_value >> 16) & 0xFF,
-                                                (bit_rate_value >> 8) & 0xFF,
-                                                bit_rate_value & 0xFF,
-                                                (uint8_t)pulse_shape,
-                                                (uint8_t)bandwidth,
-                                                (frequency_deviation_value >> 16) & 0xFF,
-                                                (frequency_deviation_value >> 8) & 0xFF,
-                                                frequency_deviation_value & 0xFF};
+    uint32_t bit_rate_value = ((uint64_t)handle->xtal_frequency_hz * 32) / bit_rate;
+    uint32_t frequency_deviation_value =
+        ((uint64_t)frequency_deviation * ((uint64_t)1 << 25)) / handle->xtal_frequency_hz;
+    uint8_t parameters[8] = {(bit_rate_value >> 16) & 0xFF,
+                             (bit_rate_value >> 8) & 0xFF,
+                             bit_rate_value & 0xFF,
+                             (uint8_t)pulse_shape,
+                             (uint8_t)bandwidth,
+                             (frequency_deviation_value >> 16) & 0xFF,
+                             (frequency_deviation_value >> 8) & 0xFF,
+                             frequency_deviation_value & 0xFF};
     return sx126x_command(handle, SX126X_CMD_SET_MODULATION_PARAMS, parameters, NULL, sizeof(parameters));
 }
 
@@ -789,6 +794,7 @@ esp_err_t sx126x_init(sx126x_handle_t* handle, spi_host_device_t spi_host_id, gp
 
     handle->timeout              = pdMS_TO_TICKS(1000);
     handle->calibrated_frequency = 0;  // Force image calibration on the first sx126x_set_rf_frequency call
+    handle->xtal_frequency_hz    = 32000000;
 
     handle->spi_semaphore = xSemaphoreCreateBinary();
     if (handle->spi_semaphore == NULL) {

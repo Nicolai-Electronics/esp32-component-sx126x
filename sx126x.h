@@ -111,6 +111,7 @@ typedef struct {
     SemaphoreHandle_t   busy_semaphore;
     SemaphoreHandle_t   interrupt_semaphore;
     uint32_t            calibrated_frequency;  // Hz, frequency the image calibration was last run for (0 initially)
+    uint32_t            xtal_frequency_hz;     // Actual crystal/TCXO frequency, defaults to the nominal 32 MHz
 } sx126x_handle_t;
 
 typedef enum {
@@ -239,6 +240,7 @@ esp_err_t sx126x_get_irq_status(sx126x_handle_t* handle, uint16_t* out_irq_statu
 esp_err_t sx126x_clear_irq_status(sx126x_handle_t* handle, uint16_t irq_mask);
 esp_err_t sx126x_set_dio2_as_rf_switch_ctrl(sx126x_handle_t* handle, bool enable);
 esp_err_t sx126x_set_dio3_as_txco_ctrl(sx126x_handle_t* handle, float voltage, float delay_us);
+esp_err_t sx126x_set_xtal_frequency(sx126x_handle_t* handle, uint32_t xtal_frequency_hz);
 esp_err_t sx126x_set_rf_frequency(sx126x_handle_t* handle, uint32_t frequency);
 esp_err_t sx126x_set_packet_type(sx126x_handle_t* handle, sx126x_packet_type_t packet_type);
 esp_err_t sx126x_get_packet_type(sx126x_handle_t* handle, sx126x_packet_type_t* out_packet_type);
