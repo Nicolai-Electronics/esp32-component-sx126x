@@ -110,6 +110,8 @@ typedef struct {
     SemaphoreHandle_t   spi_semaphore;
     SemaphoreHandle_t   busy_semaphore;
     SemaphoreHandle_t   interrupt_semaphore;
+    uint32_t            calibrated_frequency;  // Hz, frequency the image calibration was last run for (0 initially)
+    uint32_t            xtal_frequency_hz;     // Actual crystal/TCXO frequency, defaults to the nominal 32 MHz
 } sx126x_handle_t;
 
 typedef enum {
@@ -224,6 +226,7 @@ esp_err_t sx126x_set_regulator_mode(sx126x_handle_t* handle, bool use_dc_dc);
 esp_err_t sx126x_calibrate(sx126x_handle_t* handle, bool rc64k, bool rc13m, bool pll, bool adc_pulse, bool adc_bulk_n,
                            bool adc_bulk_p, bool image);
 esp_err_t sx126x_calibrate_image(sx126x_handle_t* handle, uint8_t frequency1, uint8_t frequency2);
+esp_err_t sx126x_calibrate_image_for_frequency(sx126x_handle_t* handle, uint32_t frequency);
 esp_err_t sx126x_set_pa_config(sx126x_handle_t* handle, uint8_t pa_duty_cycle, uint8_t hp_max, bool is_sx1261);
 esp_err_t sx126x_set_rx_tx_fallback_mode(sx126x_handle_t* handle, sx126x_fallback_mode_t fallback_mode);
 esp_err_t sx126x_write_register(sx126x_handle_t* handle, uint16_t address, const uint8_t* values, size_t length);
@@ -237,13 +240,14 @@ esp_err_t sx126x_get_irq_status(sx126x_handle_t* handle, uint16_t* out_irq_statu
 esp_err_t sx126x_clear_irq_status(sx126x_handle_t* handle, uint16_t irq_mask);
 esp_err_t sx126x_set_dio2_as_rf_switch_ctrl(sx126x_handle_t* handle, bool enable);
 esp_err_t sx126x_set_dio3_as_txco_ctrl(sx126x_handle_t* handle, float voltage, float delay_us);
+esp_err_t sx126x_set_xtal_frequency(sx126x_handle_t* handle, uint32_t xtal_frequency_hz);
 esp_err_t sx126x_set_rf_frequency(sx126x_handle_t* handle, uint32_t frequency);
 esp_err_t sx126x_set_packet_type(sx126x_handle_t* handle, sx126x_packet_type_t packet_type);
 esp_err_t sx126x_get_packet_type(sx126x_handle_t* handle, sx126x_packet_type_t* out_packet_type);
 esp_err_t sx126x_set_tx_params(sx126x_handle_t* handle, int8_t power, bool pa_is_high_power, uint32_t ramp_time_us);
 esp_err_t sx126x_set_modulation_params_lora(sx126x_handle_t* handle, sx126x_lora_spreading_factor_t spreading_factor,
                                             sx126x_lora_bandwidth_t bandwidth, sx126x_lora_coding_rate_t coding_rate,
-                                            bool low_data_rate_optimization);
+                                            bool automatic_ldro, bool low_data_rate_optimization);
 esp_err_t sx126x_set_modulation_params_gfsk(sx126x_handle_t* handle, uint32_t bit_rate,
                                             sx1262_gfsk_pulse_shape_t pulse_shape, sx126x_gfsk_bandwidth_t bandwidth,
                                             uint32_t frequency_deviation);
@@ -261,6 +265,8 @@ esp_err_t sx126x_set_buffer_base_address(sx126x_handle_t* handle, uint8_t tx_bas
 esp_err_t sx126x_set_lora_symb_num_timeout(sx126x_handle_t* handle, uint8_t symb_num);
 esp_err_t sx126x_get_status(sx126x_handle_t* handle, uint8_t* out_command_status, uint8_t* out_chip_mode);
 esp_err_t sx126x_get_rx_buffer_status(sx126x_handle_t* handle, uint8_t* out_payload_length, uint8_t* out_start_pointer);
+esp_err_t sx126x_get_lora_frequency_error(sx126x_handle_t* handle, sx126x_lora_bandwidth_t bandwidth,
+                                          float* out_frequency_error_hz);
 esp_err_t sx126x_get_packet_status_lora(sx126x_handle_t* handle, float* out_snr_pkt_db, float* out_rssi_pkt_dbm, 
                                         float* out_signal_rssi_pkt_db);
 esp_err_t sx126x_get_packet_status_gfsk(sx126x_handle_t* handle, uint8_t* out_rx_status, float* out_rssi_sync_dbm,

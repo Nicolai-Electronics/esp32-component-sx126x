@@ -1,5 +1,6 @@
 #include "sx126x.h"
 #include <iso646.h>
+#include <math.h>
 #include <stdint.h>
 #include "driver/spi_common.h"
 #include "driver/spi_master.h"
@@ -49,6 +50,21 @@
 #define SX126X_CMD_GET_DEVICE_ERRORS          0x17
 #define SX126X_CMD_CLEAR_DEVICE_ERRORS        0x07
 #define SX126X_CMD_SET_BUFFER_BASE_ADDRESS    0x8F
+
+// Image calibration byte pairs for the predefined frequency bands (datasheet section 9.2.1 / 13.1.7)
+#define SX126X_CAL_IMG_430_MHZ_1 0x6B
+#define SX126X_CAL_IMG_430_MHZ_2 0x6F
+#define SX126X_CAL_IMG_470_MHZ_1 0x75
+#define SX126X_CAL_IMG_470_MHZ_2 0x81
+#define SX126X_CAL_IMG_779_MHZ_1 0xC1
+#define SX126X_CAL_IMG_779_MHZ_2 0xC5
+#define SX126X_CAL_IMG_863_MHZ_1 0xD7
+#define SX126X_CAL_IMG_863_MHZ_2 0xDB
+#define SX126X_CAL_IMG_902_MHZ_1 0xE1
+#define SX126X_CAL_IMG_902_MHZ_2 0xE9
+
+// Re-run image calibration whenever the RF frequency moves by at least this much
+#define SX126X_CAL_IMG_FREQ_TRIG_HZ 20000000  // 20 MHz
 
 static const char* TAG = "sx126x";
 
@@ -110,6 +126,38 @@ static esp_err_t sx126x_command(sx126x_handle_t* handle, uint8_t command, const 
     if (res != ESP_OK) return res;
 
     return sx126x_busy_wait(handle);
+}
+
+static float sx126x_lora_bandwidth_khz(sx126x_lora_bandwidth_t bandwidth) {
+    switch (bandwidth) {
+        case SX126X_LORA_BANDWIDTH_7:
+            return 7.8f;
+        case SX126X_LORA_BANDWIDTH_10:
+            return 10.4f;
+        case SX126X_LORA_BANDWIDTH_15:
+            return 15.6f;
+        case SX126X_LORA_BANDWIDTH_20:
+            return 20.8f;
+        case SX126X_LORA_BANDWIDTH_31:
+            return 31.25f;
+        case SX126X_LORA_BANDWIDTH_41:
+            return 41.7f;
+        case SX126X_LORA_BANDWIDTH_62:
+            return 62.5f;
+        case SX126X_LORA_BANDWIDTH_125:
+            return 125.0f;
+        case SX126X_LORA_BANDWIDTH_250:
+            return 250.0f;
+        case SX126X_LORA_BANDWIDTH_500:
+            return 500.0f;
+    }
+    return 125.0f;  // Unreachable for a valid enum value
+}
+
+static bool sx126x_lora_calculate_ldro(sx126x_lora_spreading_factor_t spreading_factor,
+                                       sx126x_lora_bandwidth_t        bandwidth) {
+    float symbol_length_ms = (float)(1u << (uint8_t)spreading_factor) / sx126x_lora_bandwidth_khz(bandwidth);
+    return symbol_length_ms >= 16.0f;
 }
 
 // Public functions - commands
@@ -201,6 +249,34 @@ esp_err_t sx126x_calibrate_image(sx126x_handle_t* handle, uint8_t frequency1, ui
     return sx126x_command(handle, SX126X_CMD_CALIBRATE_IMAGE, parameters, NULL, sizeof(parameters));
 }
 
+esp_err_t sx126x_calibrate_image_for_frequency(sx126x_handle_t* handle, uint32_t frequency) {
+    if (handle == NULL) return ESP_ERR_INVALID_ARG;
+
+    int freq_band_mhz = (int)(frequency / 1000000);
+    if (freq_band_mhz >= 902 && freq_band_mhz <= 928) {
+        return sx126x_calibrate_image(handle, SX126X_CAL_IMG_902_MHZ_1, SX126X_CAL_IMG_902_MHZ_2);
+    } else if (freq_band_mhz >= 863 && freq_band_mhz <= 870) {
+        return sx126x_calibrate_image(handle, SX126X_CAL_IMG_863_MHZ_1, SX126X_CAL_IMG_863_MHZ_2);
+    } else if (freq_band_mhz >= 779 && freq_band_mhz <= 787) {
+        return sx126x_calibrate_image(handle, SX126X_CAL_IMG_779_MHZ_1, SX126X_CAL_IMG_779_MHZ_2);
+    } else if (freq_band_mhz >= 470 && freq_band_mhz <= 510) {
+        return sx126x_calibrate_image(handle, SX126X_CAL_IMG_470_MHZ_1, SX126X_CAL_IMG_470_MHZ_2);
+    } else if (freq_band_mhz >= 430 && freq_band_mhz <= 440) {
+        return sx126x_calibrate_image(handle, SX126X_CAL_IMG_430_MHZ_1, SX126X_CAL_IMG_430_MHZ_2);
+    }
+
+    // Frequency falls outside the predefined bands: derive calibration bytes for a +/-4 MHz
+    // window around it, per the datasheet's CalibrateImage guidance.
+    float   freq_mhz = (float)frequency / 1000000.0f;
+    float   freq_min = freq_mhz - 4.0f;
+    float   freq_max = freq_mhz + 4.0f;
+    uint8_t data0    = (uint8_t)floorf((freq_min - 1.0f) / 4.0f);
+    uint8_t data1    = (uint8_t)ceilf((freq_max + 1.0f) / 4.0f);
+    data0            = (data0 % 2) ? data0 : (uint8_t)(data0 - 1);
+    data1            = (data1 % 2) ? data1 : (uint8_t)(data1 + 1);
+    return sx126x_calibrate_image(handle, data0, data1);
+}
+
 esp_err_t sx126x_set_pa_config(sx126x_handle_t* handle, uint8_t pa_duty_cycle, uint8_t hp_max, bool is_sx1261) {
     if (handle == NULL || hp_max > 0x07) return ESP_ERR_INVALID_ARG;
     uint8_t pa_lut        = 0x01;  // Reserved byte, always 0x01
@@ -287,14 +363,14 @@ esp_err_t sx126x_set_dio2_as_rf_switch_ctrl(sx126x_handle_t* handle, bool enable
 esp_err_t sx126x_set_dio3_as_txco_ctrl(sx126x_handle_t* handle, float voltage, float delay_us) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
     uint8_t voltage_value = 0;
-    if (voltage >= 1.6) voltage_value = 0x01;
-    if (voltage >= 1.7) voltage_value = 0x02;
-    if (voltage >= 1.8) voltage_value = 0x03;
-    if (voltage >= 2.2) voltage_value = 0x04;
+    if (voltage >= 1.7) voltage_value = 0x01;
+    if (voltage >= 1.8) voltage_value = 0x02;
+    if (voltage >= 2.2) voltage_value = 0x03;
+    if (voltage >= 2.4) voltage_value = 0x04;
     if (voltage >= 2.7) voltage_value = 0x05;
     if (voltage >= 3.0) voltage_value = 0x06;
     if (voltage >= 3.3) voltage_value = 0x07;
-    uint32_t delay_value = (uint32_t)(delay_us / 15.62f);
+    uint32_t delay_value = (uint32_t)(delay_us / 15.625f);
     if (delay_value > 0x00FFFFFF) return ESP_ERR_INVALID_ARG;  // Delay exceeds maximum value
     uint8_t parameters[4];
     parameters[0] = voltage_value;
@@ -304,11 +380,28 @@ esp_err_t sx126x_set_dio3_as_txco_ctrl(sx126x_handle_t* handle, float voltage, f
     return sx126x_command(handle, SX126X_CMD_SET_DIO3_AS_TXCO_CTRL, parameters, NULL, sizeof(parameters));
 }
 
+esp_err_t sx126x_set_xtal_frequency(sx126x_handle_t* handle, uint32_t xtal_frequency_hz) {
+    if (handle == NULL || xtal_frequency_hz == 0) return ESP_ERR_INVALID_ARG;
+    handle->xtal_frequency_hz = xtal_frequency_hz;
+    return ESP_OK;
+}
+
 esp_err_t sx126x_set_rf_frequency(sx126x_handle_t* handle, uint32_t frequency) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
-    const uint64_t xtal_frequency  = 32000000;  // Hz
-    uint32_t       frequency_value = ((uint64_t)(frequency) * (uint64_t)((1) << 25)) / xtal_frequency;
-    uint8_t        frequency_bytes[4];
+
+    // Image rejection calibration is only valid near the frequency it was performed at, so
+    // re-calibrate whenever the carrier moves far enough that the old calibration no longer
+    // applies (e.g. hopping between regional bands). This mirrors RadioLib's SX1262::setFrequency.
+    uint32_t delta = (frequency > handle->calibrated_frequency) ? (frequency - handle->calibrated_frequency)
+                                                                : (handle->calibrated_frequency - frequency);
+    if (delta >= SX126X_CAL_IMG_FREQ_TRIG_HZ) {
+        esp_err_t res = sx126x_calibrate_image_for_frequency(handle, frequency);
+        if (res != ESP_OK) return res;
+        handle->calibrated_frequency = frequency;
+    }
+
+    uint32_t frequency_value = ((uint64_t)(frequency) * (uint64_t)((1) << 25)) / handle->xtal_frequency_hz;
+    uint8_t  frequency_bytes[4];
     frequency_bytes[0] = (frequency_value >> 24) & 0xFF;
     frequency_bytes[1] = (frequency_value >> 16) & 0xFF;
     frequency_bytes[2] = (frequency_value >> 8) & 0xFF;
@@ -356,28 +449,28 @@ esp_err_t sx126x_set_tx_params(sx126x_handle_t* handle, int8_t power, bool pa_is
 
 esp_err_t sx126x_set_modulation_params_lora(sx126x_handle_t* handle, sx126x_lora_spreading_factor_t spreading_factor,
                                             sx126x_lora_bandwidth_t bandwidth, sx126x_lora_coding_rate_t coding_rate,
-                                            bool low_data_rate_optimization) {
+                                            bool automatic_ldro, bool low_data_rate_optimization) {
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
-    uint8_t parameters[4] = {(uint8_t)spreading_factor, (uint8_t)bandwidth, (uint8_t)coding_rate,
-                             low_data_rate_optimization ? 0x01 : 0x00};
+    bool ldro = automatic_ldro ? sx126x_lora_calculate_ldro(spreading_factor, bandwidth) : low_data_rate_optimization;
+    uint8_t parameters[4] = {(uint8_t)spreading_factor, (uint8_t)bandwidth, (uint8_t)coding_rate, ldro ? 0x01 : 0x00};
     return sx126x_command(handle, SX126X_CMD_SET_MODULATION_PARAMS, parameters, NULL, sizeof(parameters));
 }
 
 esp_err_t sx126x_set_modulation_params_gfsk(sx126x_handle_t* handle, uint32_t bit_rate,
                                             sx1262_gfsk_pulse_shape_t pulse_shape, sx126x_gfsk_bandwidth_t bandwidth,
                                             uint32_t frequency_deviation) {
-    if (handle == NULL) return ESP_ERR_INVALID_ARG;
-    const float xtal_frequency            = 32.0f;
-    uint32_t    bit_rate_value            = (32 * xtal_frequency) / bit_rate;
-    uint32_t    frequency_deviation_value = (uint32_t)((frequency_deviation * (1 << 25))) / xtal_frequency;
-    uint8_t     parameters[8]             = {(bit_rate_value >> 16) & 0xFF,
-                                             (bit_rate_value >> 8) & 0xFF,
-                                             bit_rate_value & 0xFF,
-                                             (uint8_t)pulse_shape,
-                                             (uint8_t)bandwidth,
-                                             (frequency_deviation_value >> 16) & 0xFF,
-                                             (frequency_deviation_value >> 8) & 0xFF,
-                                             frequency_deviation_value & 0xFF};
+    if (handle == NULL || bit_rate == 0) return ESP_ERR_INVALID_ARG;
+    uint32_t bit_rate_value = ((uint64_t)handle->xtal_frequency_hz * 32) / bit_rate;
+    uint32_t frequency_deviation_value =
+        ((uint64_t)frequency_deviation * ((uint64_t)1 << 25)) / handle->xtal_frequency_hz;
+    uint8_t parameters[8] = {(bit_rate_value >> 16) & 0xFF,
+                             (bit_rate_value >> 8) & 0xFF,
+                             bit_rate_value & 0xFF,
+                             (uint8_t)pulse_shape,
+                             (uint8_t)bandwidth,
+                             (frequency_deviation_value >> 16) & 0xFF,
+                             (frequency_deviation_value >> 8) & 0xFF,
+                             frequency_deviation_value & 0xFF};
     return sx126x_command(handle, SX126X_CMD_SET_MODULATION_PARAMS, parameters, NULL, sizeof(parameters));
 }
 
@@ -473,6 +566,30 @@ esp_err_t sx126x_get_packet_status_lora(sx126x_handle_t* handle, float* out_snr_
     if (res == ESP_OK && out_snr_pkt_db) *out_snr_pkt_db = (float)(result[3] / 4.0f);
     if (res == ESP_OK && out_signal_rssi_pkt_db) *out_signal_rssi_pkt_db = (float)(-result[4] / 2.0f);
     return res;
+}
+
+esp_err_t sx126x_get_lora_frequency_error(sx126x_handle_t* handle, sx126x_lora_bandwidth_t bandwidth,
+                                          float* out_frequency_error_hz) {
+    if (handle == NULL) return ESP_ERR_INVALID_ARG;
+
+    uint8_t   efe_raw[3];
+    esp_err_t res = sx126x_read_register(handle, SX126X_REG_FREQ_ERROR, efe_raw, sizeof(efe_raw));
+    if (res != ESP_OK) return res;
+
+    if (out_frequency_error_hz == NULL) return ESP_OK;
+
+    uint32_t efe  = ((uint32_t)efe_raw[0] << 16) | ((uint32_t)efe_raw[1] << 8) | efe_raw[2];
+    efe          &= 0x0FFFFF;  // 20-bit signed value
+
+    float bandwidth_khz = sx126x_lora_bandwidth_khz(bandwidth);
+    if (efe & 0x80000) {
+        efe                     = (~efe + 1) & 0x0FFFFF;  // Negative: undo two's complement
+        *out_frequency_error_hz = -1.55f * (float)efe / (1600.0f / bandwidth_khz);
+    } else {
+        *out_frequency_error_hz = 1.55f * (float)efe / (1600.0f / bandwidth_khz);
+    }
+
+    return ESP_OK;
 }
 
 esp_err_t sx126x_get_packet_status_gfsk(sx126x_handle_t* handle, uint8_t* out_rx_status, float* out_rssi_sync_dbm,
@@ -675,7 +792,9 @@ esp_err_t sx126x_init(sx126x_handle_t* handle, spi_host_device_t spi_host_id, gp
 
     if (!handle) return ESP_ERR_INVALID_ARG;
 
-    handle->timeout = pdMS_TO_TICKS(1000);
+    handle->timeout              = pdMS_TO_TICKS(1000);
+    handle->calibrated_frequency = 0;  // Force image calibration on the first sx126x_set_rf_frequency call
+    handle->xtal_frequency_hz    = 32000000;
 
     handle->spi_semaphore = xSemaphoreCreateBinary();
     if (handle->spi_semaphore == NULL) {
