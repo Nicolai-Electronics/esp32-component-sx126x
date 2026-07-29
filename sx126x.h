@@ -5,6 +5,8 @@
 #include "driver/spi_common.h"
 #include "driver/spi_master.h"
 #include "esp_err.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 // Registers
 #define SX126X_REG_RX_GAIN_RETENTION(X)             (0x029F + (X))  // 0-2
